@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SVV VSE — Final Stock Trainer (chart fixes)</title>
+
+  <!-- Firebase compat -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+  <!-- Tailwind + axios + lightweight-charts -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+
+  <style>
+    body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;margin:0;transition:background .2s,color .2s}
+    .card{background:white;padding:14px;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,0.06);margin-bottom:14px;}
+    .dark .card{background:#0b1220;color:#e6eef8}
+    input,select,textarea{outline:none}
+    .search-result{padding:8px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;border-radius:6px}
+    .search-result:hover{background:#eef2ff}
+    .dark .search-result:hover{background:#23303f}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:8px;border:1px solid #e8eef8;text-align:center}
+    .dark th,.dark td{border-color:#223041}
+    #chart{width:100%;height:420px}
+    .small{font-size:.85rem;color:#6b7280}
+    .muted{color:#9aa7c0;font-size:.9rem}
+    .errorBox { padding:8px; border-radius:6px; background:#fff4f4; color:#7a1f1f; margin-top:6px; }
+    .dark .errorBox { background:#3a2123; color:#ffb4b4; }
+  </style>
+</head>
+<body class="light">
+
+<!-- LOGIN / WELCOME -->
+<div id="login-screen" class="p-6 max-w-4xl mx-auto">
+  <h1 class="text-2xl font-bold mb-4">SVV VSE — Stock Trainer</h1>
+
+  <div id="common-card" class="card">
+    <label class="block mb-2 font-medium">Enter common password</label>
+    <input id="commonPassword" type="password" placeholder="Common password" class="w-full border rounded p-2" />
+    <div class="mt-3 flex gap-3 items-center">
+      <button onclick="checkCommon()" class="bg-blue-600 text-white px-4 py-2 rounded">Next</button>
+      <div class="small">You must enter the common password to proceed.</div>
+    </div>
+  </div>
+
+  <div id="auth-card" class="card hidden">
+    <div class="grid md:grid-cols-2 gap-4">
+      <div>
+        <h2 class="font-semibold mb-2">Create account</h2>
+        <input id="signupName" placeholder="Full name" class="w-full border rounded p-2 mb-2" />
+        <input id="signupEmail" placeholder="Email" class="w-full border rounded p-2 mb-2" />
+        <input id="signupPass" type="password" placeholder="Password" class="w-full border rounded p-2 mb-2" />
+        <div class="flex gap-2">
+          <button onclick="signup()" class="bg-green-600 text-white px-4 py-2 rounded">Sign up</button>
+        </div>
+      </div>
+      <div>
+        <h2 class="font-semibold mb-2">Login</h2>
+        <input id="loginEmail" placeholder="Email" class="w-full border rounded p-2 mb-2" />
+        <input id="loginPass" placeholder="Password" type="password" class="w-full border rounded p-2 mb-2" />
+        <div class="flex gap-2 items-center">
+          <button onclick="login()" class="bg-blue-600 text-white px-4 py-2 rounded">Login</button>
+          <button onclick="adminQuick()" class="bg-yellow-500 text-black px-4 py-2 rounded">Admin quick</button>
+        </div>
+        <p class="small mt-3">If you forget password admin can send password reset from Admin panel.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" class="hidden min-h-screen">
+
+  <!-- NAV -->
+  <header class="flex items-center justify-between p-4 bg-blue-800 text-white">
+    <div class="flex items-center gap-4">
+      <div class="font-bold text-lg">SVV VSE</div>
+      <nav class="hidden md:flex gap-2">
+        <button class="px-3 py-1 bg-blue-600 rounded" onclick="showTab('stocks')">Stocks</button>
+        <button class="px-3 py-1 bg-blue-600 rounded" onclick="showTab('holdings')">Holdings</button>
+        <button class="px-3 py-1 bg-blue-600 rounded" onclick="showTab('orders')">Orders</button>
+        <button class="px-3 py-1 bg-blue-600 rounded" onclick="showTab('watchlist')">Watchlist</button>
+        <button class="px-3 py-1 bg-blue-600 rounded" onclick="showTab('admin')">Admin</button>
+      </nav>
+    </div>
+
+    <div class="flex items-center gap-4">
+      <div>Balance: ₹ <span id="uiBalance">0</span></div>
+      <div id="uiUser" class="small"></div>
+      <select id="refreshInterval" class="rounded p-1" onchange="changeInterval()">
+        <option value="1000">1s</option>
+        <option value="2500" selected>2.5s</option>
+        <option value="5000">5s</option>
+      </select>
+      <button id="themeBtn" onclick="toggleTheme()" class="px-3 py-1 rounded bg-gray-200 text-black">Theme</button>
+      <button onclick="logout()" class="px-3 py-1 rounded bg-red-600">Logout</button>
+    </div>
+  </header>
+
+  <main class="p-6 max-w-6xl mx-auto">
+
+    <!-- Stocks tab -->
+    <section id="tab-stocks" class="tab">
+      <div class="card">
+        <div class="grid md:grid-cols-3 gap-4">
+          <div>
+            <label class="block mb-2 font-medium">Search NSE (auto-suggest)</label>
+            <input id="searchInput" oninput="onSearch()" placeholder="Type symbol or company name (e.g. TA, INFY)" class="w-full border rounded p-2" />
+            <div id="searchResults" class="mt-2 max-h-56 overflow-y-auto border rounded p-1"></div>
+          </div>
+
+          <div>
+            <label class="block mb-2 font-medium">Selected</label>
+            <div id="selectedInfo" class="p-3 border rounded min-h-[80px]">No selection</div>
+            <div class="mt-2 flex gap-2">
+              <input id="qtyInput" type="number" placeholder="Qty" class="border rounded p-2 w-28" />
+              <button onclick="buyAction()" class="bg-green-600 text-white px-3 py-2 rounded">Buy</button>
+              <button onclick="sellAction()" class="bg-red-600 text-white px-3 py-2 rounded">Sell all</button>
+              <button onclick="watchAdd()" class="bg-yellow-500 text-black px-3 py-2 rounded">Add watch</button>
+            </div>
+            <div class="mt-2 small">Last price: <span id="lastPrice">—</span></div>
+            <div id="chartError" class="errorBox hidden"></div>
+          </div>
+
+          <div>
+            <label class="block mb-2 font-medium">Chart (Lightweight Charts)</label>
+            <div id="chart" class="border rounded" ></div>
+            <div class="small mt-1">Use mouse wheel / drag to zoom & pan.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Holdings -->
+    <section id="tab-holdings" class="tab hidden">
+      <div class="card">
+        <h3 class="font-semibold mb-3">Holdings</h3>
+        <div class="overflow-x-auto">
+          <table><thead><tr><th>Stock</th><th>Qty</th><th>Avg Price</th><th>Current</th><th>Value</th><th>P/L</th></tr></thead>
+            <tbody id="holdingsBody"></tbody></table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Orders -->
+    <section id="tab-orders" class="tab hidden">
+      <div class="card">
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="font-semibold">Orders / Transactions</h3>
+          <div>
+            <button onclick="exportOrders()" class="px-3 py-1 bg-indigo-600 text-white rounded">Export CSV</button>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table><thead><tr><th>Date</th><th>Stock</th><th>Qty</th><th>Price</th><th>Type</th></tr></thead>
+            <tbody id="ordersBody"></tbody></table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Watchlist -->
+    <section id="tab-watchlist" class="tab hidden">
+      <div class="card">
+        <h3 class="font-semibold mb-3">Watchlist</h3>
+        <ul id="watchlistBody" class="space-y-2"></ul>
+      </div>
+    </section>
+
+    <!-- Admin -->
+    <section id="tab-admin" class="tab hidden">
+      <div class="card">
+        <h3 class="font-semibold mb-3">Admin Leaderboard</h3>
+        <div class="small mb-2">Shows name, email, masked password, balance, portfolio value, orders. Admin can send reset email or impersonate.</div>
+        <div class="overflow-x-auto">
+          <table><thead><tr><th>Name</th><th>Email</th><th>Password (masked)</th><th>Balance</th><th>Portfolio</th><th>Orders</th><th>Actions</th></tr></thead>
+            <tbody id="adminBody"></tbody></table>
+        </div>
+      </div>
+
+      <div id="impersonationCard" class="card hidden mt-4">
+        <div class="flex justify-between">
+          <div>Impersonating: <span id="impersonatedUser"></span></div>
+          <div><button onclick="stopImpersonation()" class="bg-red-600 text-white px-3 py-1 rounded">Stop impersonation</button></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+/* ---------------------------
+  CONFIG
+----------------------------*/
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyC8nRb_Rw4zdj5M0B91J5wwkK43QWFes9w",
+  authDomain: "svvweb-b9d76.firebaseapp.com",
+  projectId: "svvweb-b9d76",
+  storageBucket: "svvweb-b9d76.firebasestorage.app",
+  messagingSenderId: "218077523369",
+  appId: "1:218077523369:web:a4848d4b6a4171a21ba8b8"
+};
+firebase.initializeApp(FIREBASE_CONFIG);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+const COMMON_PASSWORD = "vse2k25";
+const ADMIN_EMAIL = "admin6@vse.com";
+const ADMIN_PASS = "adminvse2k25";
+const TD_KEY = "c933f15065e54a7b9d8908b084d72de1";
+
+/* ---------------------------
+  GLOBAL STATE
+----------------------------*/
+let currentUser = null;
+let impersonatedId = null;
+let symbols = [];
+let selectedSymbol = null;
+let chart = null;
+let candleSeries = null;
+let liveInterval = 2500;
+let liveHandle = null;
+const PRICE_CACHE_TTL = 4000;
+const priceCache = {};
+const candleCache = {};
+const lastCandleTime = {}; // map symbol->last epoch secs
+
+/* ---------------------------
+  UI helpers
+----------------------------*/
+const $ = id => document.getElementById(id);
+const show = el => el.classList.remove('hidden');
+const hide = el => el.classList.add('hidden');
+const showTab = name => { document.querySelectorAll('.tab').forEach(t=>t.classList.add('hidden')); $('tab-'+name).classList.remove('hidden'); window.scrollTo(0,0); };
+const toFixed = n => ((Math.round((n||0)*100)/100).toFixed(2));
+const escapeHtml = s => String(s || '').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+
+/* ---------------------------
+  THEME
+----------------------------*/
+function toggleTheme(){
+  document.body.classList.toggle('dark'); document.body.classList.toggle('light');
+  recreateChartForTheme();
+}
+$('themeBtn').addEventListener('click', toggleTheme);
+
+/* ---------------------------
+  COMMON PASS
+----------------------------*/
+function checkCommon(){
+  const v = $('commonPassword').value.trim();
+  if(v === COMMON_PASSWORD){ hide($('common-card')); show($('auth-card')); } else alert('Incorrect common password');
+}
+
+/* ---------------------------
+  AUTH
+----------------------------*/
+async function signup(){
+  const name = $('signupName').value.trim();
+  const email = $('signupEmail').value.trim();
+  const pass = $('signupPass').value;
+  if(!name||!email||!pass) return alert('Fill fields');
+  try{
+    const res = await auth.createUserWithEmailAndPassword(email, pass);
+    currentUser = res.user;
+    await db.collection('users').doc(currentUser.uid).set({
+      name, email, balance:50000, portfolio:{}, orders:[], watchlist:[], createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    await currentUser.updateProfile({ displayName: name });
+    afterAuth();
+  }catch(e){ alert(e.message); }
+}
+async function login(){
+  const email = $('loginEmail').value.trim();
+  const pass = $('loginPass').value;
+  if(!email||!pass) return alert('Fill fields');
+  try{
+    const res = await auth.signInWithEmailAndPassword(email, pass);
+    currentUser = res.user;
+    afterAuth();
+  }catch(e){ alert(e.message); }
+}
+function adminQuick(){
+  currentUser = { uid: 'admin', email: ADMIN_EMAIL, displayName: 'Admin' };
+  afterAuth(true);
+}
+
+/* ---------------------------
+  AFTER AUTH / INIT
+----------------------------*/
+async function afterAuth(){
+  hide($('login-screen')); show($('app'));
+  $('uiUser').innerText = currentUser.email || 'Admin';
+  if(currentUser.uid !== 'admin'){
+    const ref = db.collection('users').doc(currentUser.uid);
+    const snap = await ref.get();
+    if(!snap.exists){
+      await ref.set({ name: currentUser.displayName || currentUser.email.split('@')[0], email: currentUser.email, balance:50000, portfolio:{}, orders:[], watchlist:[] });
+    }
+  }
+  await loadSymbolList();
+  recreateChartForTheme();
+  startLiveUpdates();
+  refreshAll();
+  showTab('stocks');
+}
+
+/* ---------------------------
+  LOAD SYMBOLS
+----------------------------*/
+async function loadSymbolList(){
+  try{
+    const res = await axios.get(`https://api.twelvedata.com/symbol_search?exchange=XNSE&apikey=${TD_KEY}`);
+    if(res.data && Array.isArray(res.data.data)){
+      symbols = res.data.data.map(s=>({ symbol:(s.symbol||'').toUpperCase(), name:s.name||'' }));
+      symbols.sort((a,b)=>a.symbol.localeCompare(b.symbol));
+    } else symbols = [];
+  }catch(e){ console.error('symbols load',e); symbols = []; }
+}
+
+/* ---------------------------
+  SEARCH UI
+----------------------------*/
+let searchTimer = null;
+function onSearch(){ clearTimeout(searchTimer); searchTimer = setTimeout(renderSearch,120); }
+function renderSearch(){
+  const q = ($('searchInput').value||'').trim().toUpperCase();
+  const out = $('searchResults'); out.innerHTML = '';
+  if(!q) return;
+  const matches = symbols.filter(s => s.symbol.includes(q) || (s.name && s.name.toUpperCase().includes(q))).slice(0,200);
+  if(matches.length===0){ out.innerHTML = '<div class="small p-2">No matches</div>'; return; }
+  for(const m of matches){
+    const div = document.createElement('div');
+    div.className = 'search-result';
+    div.innerHTML = `<div><strong>${escapeHtml(m.symbol)}</strong> <div class="small">${escapeHtml(m.name||'')}</div></div><div class="small">NSE</div>`;
+    div.onclick = ()=> selectSymbol(m.symbol, m.name);
+    out.appendChild(div);
+  }
+}
+
+/* ---------------------------
+  CHART: create / recreate (theme aware)
+----------------------------*/
+function recreateChartForTheme(){
+  try{ if(chart) chart.remove(); } catch(e){}
+  const container = $('chart');
+  container.innerHTML = '';
+  const width = container.clientWidth || Math.max(600, window.innerWidth*0.6);
+  chart = LightweightCharts.createChart(container, {
+    width,
+    height: 420,
+    layout: {
+      background: document.body.classList.contains('dark') ? '#0b1220' : '#ffffff',
+      textColor: document.body.classList.contains('dark') ? '#e6eef8' : '#111827'
+    },
+    grid: {
+      vertLines: { color: document.body.classList.contains('dark') ? '#12202b' : '#f0f6ff' },
+      horzLines: { color: document.body.classList.contains('dark') ? '#12202b' : '#f0f6ff' },
+    },
+    rightPriceScale: { borderColor: 'rgba(0,0,0,0)' },
+    timeScale: { borderColor: 'rgba(0,0,0,0)' }
+  });
+  candleSeries = chart.addCandlestickSeries({
+    upColor: '#26a69a', borderUpColor: '#26a69a', wickUpColor: '#26a69a',
+    downColor: '#ef5350', borderDownColor: '#ef5350', wickDownColor: '#ef5350'
+  });
+  // observe resize
+  new ResizeObserver(() => { try{ chart.applyOptions({ width: container.clientWidth }); }catch(e){} }).observe(container);
+}
+
+/* ---------------------------
+  Build chart data for a symbol (robust)
+----------------------------*/
+async function buildChartForSymbol(sym){
+  $('chartError').classList.add('hidden'); $('chartError').innerText = '';
+  if(!sym){ candleSeries.setData([]); return; }
+  selectedSymbol = sym.toUpperCase();
+  // ensure chart exists and series exists
+  if(!chart || !candleSeries) recreateChartForTheme();
+  const cacheKey = `ts_${sym}`;
+  try{
+    // prefer cached full-series if recent
+    if(candleCache[cacheKey] && (Date.now() - candleCache[cacheKey].ts) < 60_000){
+      candleSeries.setData(candleCache[cacheKey].data);
+      lastCandleTime[sym] = candleCache[cacheKey].lastTime || (candleCache[cacheKey].data.length ? candleCache[cacheKey].data[candleCache[cacheKey].data.length-1].time : undefined);
+      return;
+    }
+    // request time_series
+    const resp = await axios.get(`https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(sym)}&interval=1min&outputsize=500&format=JSON&apikey=${TD_KEY}`, { timeout: 10000 });
+    if(resp.data && Array.isArray(resp.data.values) && resp.data.values.length){
+      const arr = resp.data.values.slice().reverse().map(v => {
+        // handle datetime or timestamp
+        let t;
+        if(v.datetime) t = Math.floor(new Date(v.datetime).getTime()/1000);
+        else if(v.timestamp) t = parseInt(v.timestamp);
+        else t = Math.floor(Date.now()/1000);
+        return { time: t, open: parseFloat(v.open), high: parseFloat(v.high), low: parseFloat(v.low), close: parseFloat(v.close) };
+      });
+      candleSeries.setData(arr);
+      candleCache[cacheKey] = { ts: Date.now(), data: arr, lastTime: arr[arr.length-1].time };
+      lastCandleTime[sym] = arr[arr.length-1].time;
+      return;
+    } else {
+      // no candle values returned — fallback to single-point candle from price
+      const price = await fetchPrice(sym);
+      if(!isNaN(price)){
+        const single = [{ time: Math.floor(Date.now()/1000), open: price, high: price, low: price, close: price }];
+        candleSeries.setData(single);
+        candleCache[cacheKey] = { ts: Date.now(), data: single, lastTime: single[0].time };
+        lastCandleTime[sym] = single[0].time;
+        return;
+      } else {
+        // show error on chart area
+        $('chartError').classList.remove('hidden');
+        $('chartError').innerText = 'No historical candle data available for this symbol right now.';
+        candleSeries.setData([]);
+        lastCandleTime[sym] = undefined;
+        return;
+      }
+    }
+  }catch(err){
+    console.error('buildChartForSymbol error', err);
+    // fallback: try price
+    const price = await fetchPrice(sym);
+    if(!isNaN(price)){
+      const single = [{ time: Math.floor(Date.now()/1000), open: price, high: price, low: price, close: price }];
+      candleSeries.setData(single);
+      candleCache[cacheKey] = { ts: Date.now(), data: single, lastTime: single[0].time };
+      lastCandleTime[sym] = single[0].time;
+      return;
+    } else {
+      $('chartError').classList.remove('hidden');
+      $('chartError').innerText = 'Failed to load chart data. Check API or network.';
+      candleSeries.setData([]);
+      lastCandleTime[sym] = undefined;
+    }
+  }
+}
+
+/* ---------------------------
+  Fetch price (with cache)
+----------------------------*/
+async function fetchPrice(sym){
+  const key = sym.toUpperCase();
+  const now = Date.now();
+  const cached = priceCache[key];
+  if(cached && (now - cached.ts) < PRICE_CACHE_TTL) return cached.price;
+  try{
+    const r = await axios.get(`https://api.twelvedata.com/price?symbol=${encodeURIComponent(key)}&apikey=${TD_KEY}`, { timeout: 6000 });
+    const p = parseFloat(r.data.price);
+    priceCache[key] = { price: p, ts: Date.now() };
+    return p;
+  }catch(e){
+    console.warn('fetchPrice error', sym, e && e.message);
+    return NaN;
+  }
+}
+
+/* ---------------------------
+  Live tick updates (price + latest candle)
+----------------------------*/
+async function liveTick(){
+  if(selectedSymbol){
+    const p = await fetchPrice(selectedSymbol);
+    $('lastPrice').innerText = isNaN(p) ? 'N/A' : '₹ '+toFixed(p);
+    // Try to fetch the most recent candle and update series
+    try{
+      const resp = await axios.get(`https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(selectedSymbol)}&interval=1min&outputsize=2&format=JSON&apikey=${TD_KEY}`, { timeout: 8000 });
+      if(resp.data && Array.isArray(resp.data.values) && resp.data.values.length){
+        const latestRaw = resp.data.values[0]; // newest first
+        let t;
+        if(latestRaw.datetime) t = Math.floor(new Date(latestRaw.datetime).getTime()/1000);
+        else if(latestRaw.timestamp) t = parseInt(latestRaw.timestamp);
+        else t = Math.floor(Date.now()/1000);
+        const bar = { time: t, open: parseFloat(latestRaw.open), high: parseFloat(latestRaw.high), low: parseFloat(latestRaw.low), close: parseFloat(latestRaw.close) };
+        const lastTime = lastCandleTime[selectedSymbol];
+        if(!lastTime){
+          // no previous -> rebuild full series
+          await buildChartForSymbol(selectedSymbol);
+        } else {
+          // update or append
+          if(bar.time > lastTime){
+            try { candleSeries.update(bar); lastCandleTime[selectedSymbol] = bar.time; }
+            catch(e){ console.warn('update failed, rebuilding chart', e); await buildChartForSymbol(selectedSymbol); }
+          } else if(bar.time === lastTime){
+            try { candleSeries.update(bar); lastCandleTime[selectedSymbol] = bar.time; }
+            catch(e){ console.warn('update failed', e); }
+          } else {
+            // older timestamp -> rebuild
+            await buildChartForSymbol(selectedSymbol);
+          }
+        }
+      }
+    }catch(e){
+      // ignore minor live update failures, show console message
+      console.warn('liveTick time_series failed for', selectedSymbol, e && e.message);
+    }
+  }
+  // update user holdings/watchlist/admin UI
+  await refreshAll();
+}
+
+/* ---------------------------
+  Live update control
+----------------------------*/
+function startLiveUpdates(){ if(window.liveHandle) clearInterval(window.liveHandle); liveTick(); window.liveHandle = setInterval(liveTick, liveInterval); }
+function changeInterval(){ const v = Number($('refreshInterval').value); if(v && v !== liveInterval){ liveInterval = v; if(window.liveHandle) clearInterval(window.liveHandle); startLiveUpdates(); } }
+
+/* ---------------------------
+  Trading actions & watchlist
+----------------------------*/
+async function buyAction(){
+  if(!currentUser || (currentUser.uid === 'admin' && !impersonatedId)) return alert('Login as user or impersonate to trade');
+  if(!selectedSymbol) return alert('Choose symbol');
+  const qty = Number($('qtyInput').value || 0);
+  if(!qty || qty <= 0) return alert('Enter quantity');
+  const price = await fetchPrice(selectedSymbol);
+  if(isNaN(price)) return alert('Price unavailable');
+  const uid = impersonatedId || currentUser.uid;
+  const ref = db.collection('users').doc(uid);
+  try{
+    await db.runTransaction(async tx => {
+      const snap = await tx.get(ref);
+      if(!snap.exists) throw new Error('User missing');
+      const data = snap.data();
+      let balance = Number(data.balance || 0);
+      const cost = price * qty;
+      if(balance < cost) throw new Error('Insufficient balance');
+      balance -= cost;
+      const portfolio = Object.assign({}, data.portfolio || {});
+      if(!portfolio[selectedSymbol]) portfolio[selectedSymbol] = { quantity:0, avgPrice:0 };
+      const h = portfolio[selectedSymbol];
+      const newAvg = ((h.avgPrice * h.quantity) + (price * qty)) / (h.quantity + qty);
+      h.avgPrice = Number(newAvg); h.quantity = (h.quantity || 0) + qty;
+      const orders = data.orders || [];
+      orders.unshift({ date: new Date().toISOString(), stock: selectedSymbol, qty, price, type: 'Buy' });
+      tx.update(ref, { balance, portfolio, orders });
+    });
+    alert('Buy executed');
+    refreshAll();
+  }catch(e){ alert(e.message || 'Buy failed'); }
+}
+
+async function sellAction(){
+  if(!currentUser || (currentUser.uid === 'admin' && !impersonatedId)) return alert('Login as user or impersonate to trade');
+  if(!selectedSymbol) return alert('Choose symbol');
+  const price = await fetchPrice(selectedSymbol); if(isNaN(price)) return alert('Price unavailable');
+  const uid = impersonatedId || currentUser.uid;
+  const ref = db.collection('users').doc(uid);
+  try{
+    await db.runTransaction(async tx => {
+      const snap = await tx.get(ref);
+      if(!snap.exists) throw new Error('User missing');
+      const data = snap.data();
+      const portfolio = Object.assign({}, data.portfolio || {});
+      const h = portfolio[selectedSymbol];
+      if(!h || !h.quantity) throw new Error('No holdings to sell');
+      const qty = h.quantity;
+      let balance = Number(data.balance || 0);
+      balance += qty * price;
+      const orders = data.orders || [];
+      orders.unshift({ date: new Date().toISOString(), stock: selectedSymbol, qty, price, type: 'Sell' });
+      delete portfolio[selectedSymbol];
+      tx.update(ref, { balance, portfolio, orders });
+    });
+    alert('Sell executed');
+    refreshAll();
+  }catch(e){ alert(e.message || 'Sell failed'); }
+}
+
+async function watchAdd(){
+  if(!currentUser || (currentUser.uid === 'admin' && !impersonatedId)) return alert('Login as user or impersonate to add');
+  if(!selectedSymbol) return alert('Choose symbol');
+  const uid = impersonatedId || currentUser.uid;
+  await db.collection('users').doc(uid).update({ watchlist: firebase.firestore.FieldValue.arrayUnion(selectedSymbol) });
+  refreshAll();
+}
+
+/* ---------------------------
+  Refresh user/admin UI
+----------------------------*/
+async function refreshAll(){
+  if(!currentUser) return;
+  if(currentUser.uid === 'admin' && !impersonatedId){
+    $('uiBalance').innerText = 'Admin';
+    await loadAdminLeaderboard();
+    return;
+  }
+  const uid = impersonatedId || currentUser.uid;
+  const doc = await db.collection('users').doc(uid).get();
+  if(!doc.exists) return;
+  const u = doc.data();
+  $('uiBalance').innerText = toFixed(u.balance || 0);
+  // holdings
+  const hb = $('holdingsBody'); hb.innerHTML = '';
+  for(const sym in (u.portfolio || {})){
+    const h = u.portfolio[sym];
+    const p = await fetchPrice(sym);
+    const cur = isNaN(p) ? 0 : p;
+    const value = cur * (h.quantity || 0);
+    const pl = (cur - h.avgPrice) * (h.quantity || 0);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td><a href="#" onclick="selectSymbol('${sym}','')">${sym}</a></td>
+                    <td>${h.quantity}</td>
+                    <td>₹ ${toFixed(h.avgPrice)}</td>
+                    <td>${isNaN(cur)?'N/A':'₹ '+toFixed(cur)}</td>
+                    <td>₹ ${toFixed(value)}</td>
+                    <td style="color:${pl>=0?'green':'red'}">₹ ${toFixed(pl)}</td>`;
+    hb.appendChild(tr);
+  }
+  // orders
+  const ob = $('ordersBody'); ob.innerHTML = '';
+  for(const o of (u.orders || [])){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${new Date(o.date).toLocaleString()}</td><td>${o.stock}</td><td>${o.qty}</td><td>₹ ${toFixed(o.price)}</td><td>${o.type}</td>`;
+    ob.appendChild(tr);
+  }
+  // watchlist
+  const wb = $('watchlistBody'); wb.innerHTML = '';
+  for(const s of (u.watchlist || [])){
+    const p = await fetchPrice(s);
+    const li = document.createElement('li'); li.className = 'flex justify-between p-2 border rounded';
+    li.innerHTML = `<div><strong>${s}</strong></div><div>${isNaN(p)?'N/A':'₹ '+toFixed(p)}</div>`;
+    wb.appendChild(li);
+  }
+}
+
+/* ---------------------------
+  ADMIN: leaderboard + impersonation
+----------------------------*/
+async function loadAdminLeaderboard(){
+  const tb = $('adminBody'); tb.innerHTML = '';
+  const snap = await db.collection('users').get();
+  const rows = [];
+  for(const doc of snap.docs){
+    const u = doc.data();
+    let pv = 0;
+    for(const sym in (u.portfolio || {})){
+      const p = await fetchPrice(sym);
+      if(!isNaN(p)) pv += p * (u.portfolio[sym].quantity || 0);
+    }
+    rows.push({ id: doc.id, name: u.name || doc.id, email: u.email || '', balance: Number(u.balance||0), portfolioValue: pv, ordersCount: (u.orders||[]).length });
+  }
+  rows.sort((a,b) => (b.balance + b.portfolioValue) - (a.balance + a.portfolioValue));
+  for(const r of rows){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.email)}</td><td>********</td>
+                    <td>₹ ${toFixed(r.balance)}</td><td>₹ ${toFixed(r.portfolioValue)}</td><td>${r.ordersCount}</td>
+                    <td>
+                      <button class="px-2 py-1 bg-indigo-600 text-white rounded" onclick="sendReset('${escapeHtml(r.email)}')">Reset</button>
+                      <button class="px-2 py-1 bg-gray-700 text-white rounded ml-2" onclick="impersonateUser('${r.id}','${escapeHtml(r.name)}','${escapeHtml(r.email)}')">View as</button>
+                    </td>`;
+    tb.appendChild(tr);
+  }
+}
+function sendReset(email){ if(!confirm('Send reset to '+email+'?')) return; auth.sendPasswordResetEmail(email).then(()=>alert('Reset sent')).catch(e=>alert(e.message)); }
+async function impersonateUser(uid, name, email){
+  if(!confirm(`Impersonate ${name} (${email})?`)) return;
+  impersonatedId = uid; show($('impersonationCard')); $('impersonatedUser').innerText = `${name} (${email})`; refreshAll(); showTab('holdings');
+}
+function stopImpersonation(){ impersonatedId = null; hide($('impersonationCard')); if(auth.currentUser) currentUser = auth.currentUser; else currentUser = { uid:'admin', email: ADMIN_EMAIL, displayName:'Admin' }; refreshAll(); }
+
+/* ---------------------------
+  Export CSV for orders
+----------------------------*/
+async function exportOrders(){
+  const uid = impersonatedId || (currentUser && currentUser.uid);
+  if(!uid) return alert('Login or impersonate');
+  const doc = await db.collection('users').doc(uid).get();
+  if(!doc.exists) return alert('No orders');
+  const orders = doc.data().orders || [];
+  if(orders.length===0) return alert('No orders');
+  const rows = [['date','stock','qty','price','type']];
+  for(const o of orders) rows.push([o.date, o.stock, o.qty, o.price, o.type]);
+  const csv = rows.map(r=> r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type:'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = `orders_${uid}.csv`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ---------------------------
+  UTILS & AUTH OBSERVER
+----------------------------*/
+auth.onAuthStateChanged(user => {
+  if(user){ currentUser = user; afterAuth(); }
+});
+function logout(){ if(currentUser && currentUser.uid === 'admin' && !impersonatedId){ location.reload(); return; } auth.signOut().then(()=>location.reload()); }
+
+</script>
+</body>
+</html>
